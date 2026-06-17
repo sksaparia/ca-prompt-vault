@@ -3,11 +3,15 @@ CA Prompt Vault — YouTube Shorts Auto-Upload
 GitHub Actions se roz subah 9 baje apne aap chalta hai
 """
 
-import os, json, subprocess, urllib.request, re, base64, asyncio
+import os, json, subprocess, urllib.request, base64, asyncio
 from datetime import datetime
 from pathlib import Path
 
-# ── ENV VARS (GitHub Secrets se aata hai) ──────────────────
+# ── ffmpeg path set karo (imageio-ffmpeg se, bina apt ke) ──
+import imageio_ffmpeg
+os.environ["PATH"] += os.pathsep + os.path.dirname(imageio_ffmpeg.get_ffmpeg_exe())
+
+# ── ENV VARS ────────────────────────────────────────────────
 ANTHROPIC_KEY    = os.environ["ANTHROPIC_API_KEY"]
 YT_CLIENT_ID     = os.environ["YT_CLIENT_ID"]
 YT_CLIENT_SECRET = os.environ["YT_CLIENT_SECRET"]
@@ -65,7 +69,7 @@ def mark_used(stem):
 
 
 def claude_script(title, num):
-    """Claude AI se Hinglish voiceover script banata hai"""
+    """Claude AI se Hinglish voiceover script"""
     prompt = f"""YouTube Shorts ke liye Hinglish voiceover script likho.
 
 Topic: CA Prompt #{num} — {title}
@@ -101,7 +105,7 @@ Sirf script text, koi heading nahi."""
 
 
 def make_voiceover(script, out_path):
-    """edge-tts se Hindi MP3 voiceover — no espeak needed"""
+    """edge-tts se Hindi MP3 voiceover — no espeak, no apt needed"""
     import edge_tts
 
     async def _generate():
@@ -115,17 +119,30 @@ def make_voiceover(script, out_path):
     asyncio.run(_generate())
 
 
+def get_ffmpeg_exe():
+    """imageio-ffmpeg se ffmpeg binary path lo"""
+    return imageio_ffmpeg.get_ffmpeg_exe()
+
+
 def build_video(image, voiceover, bgm, output):
     """FFmpeg se 9:16 final Short banata hai"""
+    ffmpeg = get_ffmpeg_exe()
+
+    # ffprobe bhi same folder mein hota hai
+    ffprobe = os.path.join(os.path.dirname(ffmpeg), "ffprobe")
+    if not os.path.exists(ffprobe):
+        # fallback: system ffprobe use karo
+        ffprobe = "ffprobe"
+
     r = subprocess.run(
-        ["ffprobe", "-v", "quiet", "-show_entries", "format=duration",
+        [ffprobe, "-v", "quiet", "-show_entries", "format=duration",
          "-of", "default=noprint_wrappers=1:nokey=1", voiceover],
         capture_output=True, text=True
     )
     dur = min(float(r.stdout.strip()) + 1.5, 58)
 
     subprocess.run([
-        "ffmpeg", "-y",
+        ffmpeg, "-y",
         "-loop", "1", "-i", str(image),
         "-i", voiceover,
         "-i", bgm,
@@ -213,19 +230,22 @@ def main():
     print(f"CA Prompt Vault — {datetime.now().strftime('%d %b %Y %I:%M %p')}")
     print(f"{'='*50}\n")
 
+    ffmpeg = get_ffmpeg_exe()
+    print(f"✅ ffmpeg path: {ffmpeg}")
+
     # BGM restore karo
     bgm_path = "bgm.mp3"
     if BGM_B64 and not os.path.exists(bgm_path):
         with open(bgm_path, "wb") as f:
             f.write(base64.b64decode(BGM_B64))
-        print("✅ BGM restored")
+        print("✅ BGM restored from secret")
     elif not os.path.exists(bgm_path):
         subprocess.run([
-            "ffmpeg", "-y", "-f", "lavfi",
+            ffmpeg, "-y", "-f", "lavfi",
             "-i", "aevalsrc=0.1*sin(2*PI*220*t)+0.08*sin(2*PI*330*t):s=44100:d=60",
             bgm_path
         ], capture_output=True)
-        print("✅ BGM generated (fallback)")
+        print("✅ BGM generated (fallback tone)")
 
     # Agle card lo
     card_path, stem = get_next_card()
@@ -274,7 +294,7 @@ def main():
     mark_used(stem)
 
     # Cleanup
-    for f in ["voiceover.mp3", "output.mp4", "voiceover.wav"]:
+    for f in ["voiceover.mp3", "output.mp4"]:
         if os.path.exists(f):
             os.remove(f)
 
