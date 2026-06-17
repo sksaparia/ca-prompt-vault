@@ -21,8 +21,7 @@ jobs:
 
       - name: Dependencies install
         run: |
-          pip install anthropic edge-tts -q
-          sudo apt-get install -y ffmpeg --fix-missing -q
+          pip install anthropic edge-tts imageio-ffmpeg -q
 
       - name: Video banao aur upload karo
         env:
