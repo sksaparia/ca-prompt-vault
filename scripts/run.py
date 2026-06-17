@@ -3,16 +3,16 @@ CA Prompt Vault — YouTube Shorts Auto-Upload
 GitHub Actions se roz subah 9 baje apne aap chalta hai
 """
 
-import os, json, subprocess, urllib.request, re, base64
+import os, json, subprocess, urllib.request, re, base64, asyncio
 from datetime import datetime
 from pathlib import Path
 
 # ── ENV VARS (GitHub Secrets se aata hai) ──────────────────
-ANTHROPIC_KEY   = os.environ["ANTHROPIC_API_KEY"]
-YT_CLIENT_ID    = os.environ["YT_CLIENT_ID"]
-YT_CLIENT_SECRET= os.environ["YT_CLIENT_SECRET"]
-YT_REFRESH_TOKEN= os.environ["YT_REFRESH_TOKEN"]
-BGM_B64         = os.environ.get("BGM_B64", "")  # base64 encoded bgm.mp3
+ANTHROPIC_KEY    = os.environ["ANTHROPIC_API_KEY"]
+YT_CLIENT_ID     = os.environ["YT_CLIENT_ID"]
+YT_CLIENT_SECRET = os.environ["YT_CLIENT_SECRET"]
+YT_REFRESH_TOKEN = os.environ["YT_REFRESH_TOKEN"]
+BGM_B64          = os.environ.get("BGM_B64", "")
 
 TRACKER_FILE = "used_cards.json"
 CARDS_DIR    = "cards"
@@ -41,7 +41,6 @@ CA_CARDS = {
 
 
 def get_next_card():
-    """Agle unused card ka image file return karta hai"""
     used = []
     if os.path.exists(TRACKER_FILE):
         with open(TRACKER_FILE) as f:
@@ -49,7 +48,7 @@ def get_next_card():
 
     all_cards = sorted(Path(CARDS_DIR).glob("*.jpg"))
     for card_path in all_cards:
-        stem = card_path.stem  # filename without extension
+        stem = card_path.stem
         if stem not in used:
             return card_path, stem
     return None, None
@@ -82,7 +81,7 @@ Rules:
 Sirf script text, koi heading nahi."""
 
     data = json.dumps({
-        "model": "claude-sonnet-4-20250514",
+        "model": "claude-sonnet-4-6",
         "max_tokens": 250,
         "messages": [{"role": "user", "content": prompt}]
     }).encode()
@@ -102,17 +101,18 @@ Sirf script text, koi heading nahi."""
 
 
 def make_voiceover(script, out_path):
-    """espeak se Hindi MP3 voiceover"""
-    wav = out_path.replace(".mp3", ".wav")
-    subprocess.run(
-        ["espeak", "-v", "hi", "-s", "138", "-p", "55", "-w", wav, script],
-        capture_output=True, check=True
-    )
-    subprocess.run(
-        ["ffmpeg", "-y", "-i", wav, "-codec:a", "libmp3lame", "-q:a", "3", out_path],
-        capture_output=True, check=True
-    )
-    os.remove(wav)
+    """edge-tts se Hindi MP3 voiceover — no espeak needed"""
+    import edge_tts
+
+    async def _generate():
+        communicate = edge_tts.Communicate(
+            script,
+            voice="hi-IN-SwaraNeural",
+            rate="+10%"
+        )
+        await communicate.save(out_path)
+
+    asyncio.run(_generate())
 
 
 def build_video(image, voiceover, bgm, output):
@@ -145,7 +145,7 @@ def build_video(image, voiceover, bgm, output):
 
 
 def get_yt_access_token():
-    """Refresh token se access token lo"""
+    import urllib.parse
     data = urllib.parse.urlencode({
         "client_id": YT_CLIENT_ID,
         "client_secret": YT_CLIENT_SECRET,
@@ -153,7 +153,6 @@ def get_yt_access_token():
         "grant_type": "refresh_token"
     }).encode()
 
-    import urllib.parse
     req = urllib.request.Request(
         "https://oauth2.googleapis.com/token",
         data=data,
@@ -165,9 +164,6 @@ def get_yt_access_token():
 
 def upload_youtube(video_path, title, description, access_token):
     """YouTube Data API v3 resumable upload"""
-    import urllib.parse
-
-    # Step 1: Upload session shuru karo
     meta = json.dumps({
         "snippet": {
             "title": title[:100],
@@ -194,7 +190,6 @@ def upload_youtube(video_path, title, description, access_token):
     with urllib.request.urlopen(init_req) as r:
         upload_url = r.headers["Location"]
 
-    # Step 2: File upload karo
     with open(video_path, "rb") as f:
         video_data = f.read()
 
@@ -218,14 +213,13 @@ def main():
     print(f"CA Prompt Vault — {datetime.now().strftime('%d %b %Y %I:%M %p')}")
     print(f"{'='*50}\n")
 
-    # BGM file restore karo (base64 se)
+    # BGM restore karo
     bgm_path = "bgm.mp3"
     if BGM_B64 and not os.path.exists(bgm_path):
         with open(bgm_path, "wb") as f:
             f.write(base64.b64decode(BGM_B64))
         print("✅ BGM restored")
     elif not os.path.exists(bgm_path):
-        # Fallback: simple tone generate karo
         subprocess.run([
             "ffmpeg", "-y", "-f", "lavfi",
             "-i", "aevalsrc=0.1*sin(2*PI*220*t)+0.08*sin(2*PI*330*t):s=44100:d=60",
@@ -239,8 +233,7 @@ def main():
         print("❌ Saari cards use ho gayi! Nayi cards add karo repo mein.")
         return
 
-    # Card info
-    info = CA_CARDS.get(stem, {"num": "?", "title": stem})
+    info  = CA_CARDS.get(stem, {"num": "?", "title": stem})
     num   = info["num"]
     title = info["title"]
     print(f"📌 Card #{num}: {title}")
@@ -262,9 +255,8 @@ def main():
     size = os.path.getsize("output.mp4") / 1024 / 1024
     print(f"   ✅ {size:.1f} MB ready")
 
-    # 4. YouTube upload
+    # 4. Upload
     print("📤 YouTube pe upload ho raha hai...")
-    import urllib.parse
     token = get_yt_access_token()
 
     yt_title = f"CA Prompt #{num}: {title} 🔥 #Shorts"
@@ -293,5 +285,4 @@ def main():
 
 
 if __name__ == "__main__":
-    import urllib.parse
     main()
