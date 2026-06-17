@@ -21,28 +21,6 @@ BGM_B64          = os.environ.get("BGM_B64", "")
 TRACKER_FILE = "used_cards.json"
 CARDS_DIR    = "cards"
 
-# ── CA CARDS DATA ───────────────────────────────────────────
-CA_CARDS = {
-    "1000573116": {"num": 8,  "title": "Bank Audit aur LFAR Preparation"},
-    "1000573117": {"num": 9,  "title": "Cash Flow Statement — Ind AS 7"},
-    "1000573118": {"num": 10, "title": "Financial Ratio Analysis"},
-    "1000573119": {"num": 11, "title": "Payroll Processing + PF/ESI Compliance"},
-    "1000573120": {"num": 12, "title": "ROC Annual Compliance — MCA Filings"},
-    "1000573121": {"num": 13, "title": "Startup Tax Benefits — Section 80-IAC"},
-    "1000573123": {"num": 14, "title": "GST E-Invoice aur E-Way Bill"},
-    "1000573124": {"num": 16, "title": "Income Tax Notice — Section 143 aur 148"},
-    "1000573125": {"num": 17, "title": "Private Limited Company Registration"},
-    "1000573126": {"num": 19, "title": "GSTR-9C GST Audit Reconciliation"},
-    "1000573128": {"num": 20, "title": "Ind AS Financial Statements Preparation"},
-    "1000573129": {"num": 21, "title": "M&A Due Diligence Checklist"},
-    "1000573130": {"num": 22, "title": "Advance Tax — Computation aur Schedule"},
-    "1000573131": {"num": 23, "title": "Form 3CD Tax Audit — 44 Clauses"},
-    "1000573132": {"num": 24, "title": "Working Capital Analysis aur Management"},
-    "1000573133": {"num": 25, "title": "LLP Registration aur Compliance"},
-    "1000573134": {"num": 26, "title": "GST Refund — RFD-01 Filing Guide"},
-    "1000573135": {"num": 27, "title": "Capital Gains on Property — Section 54"},
-}
-
 
 def get_next_card():
     used = []
@@ -50,9 +28,18 @@ def get_next_card():
         with open(TRACKER_FILE) as f:
             used = json.load(f)
 
-    all_cards = sorted(Path(CARDS_DIR).glob("*.jpg"))
+    # .jpg, .jpeg, .png — teeno dhundho
+    all_cards = sorted(
+        list(Path(CARDS_DIR).glob("*.jpg")) +
+        list(Path(CARDS_DIR).glob("*.jpeg")) +
+        list(Path(CARDS_DIR).glob("*.png"))
+    )
+
+    print(f"📂 Total cards found: {len(all_cards)}")
+    print(f"✅ Already used: {len(used)}")
+
     for card_path in all_cards:
-        stem = card_path.stem
+        stem = card_path.name  # poora naam use karo stem ki jagah
         if stem not in used:
             return card_path, stem
     return None, None
@@ -68,8 +55,41 @@ def mark_used(stem):
         json.dump(used, f)
 
 
-def claude_script(title, num):
+def claude_script(card_name, num):
     """Claude AI se Hinglish voiceover script"""
+
+    # Card number se title guess karo
+    titles = {
+        1: "GST Registration Checklist",
+        2: "Maximize GST Input Tax Credit",
+        3: "GSTR-9 Annual Return Filing",
+        4: "Income Tax Planning — Salaried Person",
+        5: "TDS Compliance Guide",
+        6: "Balance Sheet Analysis",
+        7: "Audit Documentation",
+        8: "Bank Audit aur LFAR Preparation",
+        9: "Cash Flow Statement — Ind AS 7",
+        10: "Financial Ratio Analysis",
+        11: "Payroll Processing + PF/ESI Compliance",
+        12: "ROC Annual Compliance — MCA Filings",
+        13: "Startup Tax Benefits — Section 80-IAC",
+        14: "GST E-Invoice aur E-Way Bill",
+        15: "Tax Planning for Business",
+        16: "Income Tax Notice — Section 143 aur 148",
+        17: "Private Limited Company Registration",
+        18: "GST Audit",
+        19: "GSTR-9C GST Audit Reconciliation",
+        20: "Ind AS Financial Statements Preparation",
+        21: "M&A Due Diligence Checklist",
+        22: "Advance Tax — Computation aur Schedule",
+        23: "Form 3CD Tax Audit — 44 Clauses",
+        24: "Working Capital Analysis aur Management",
+        25: "LLP Registration aur Compliance",
+        26: "GST Refund — RFD-01 Filing Guide",
+        27: "Capital Gains on Property — Section 54",
+    }
+    title = titles.get(num, f"CA Prompt #{num}")
+
     prompt = f"""YouTube Shorts ke liye Hinglish voiceover script likho.
 
 Topic: CA Prompt #{num} — {title}
@@ -101,11 +121,11 @@ Sirf script text, koi heading nahi."""
     )
     with urllib.request.urlopen(req) as r:
         resp = json.loads(r.read())
-    return resp["content"][0]["text"].strip()
+    return resp["content"][0]["text"].strip(), title
 
 
 def make_voiceover(script, out_path):
-    """edge-tts se Hindi MP3 voiceover — no espeak, no apt needed"""
+    """edge-tts se Hindi MP3 voiceover"""
     import edge_tts
 
     async def _generate():
@@ -119,23 +139,29 @@ def make_voiceover(script, out_path):
     asyncio.run(_generate())
 
 
-def get_ffmpeg_exe():
-    """imageio-ffmpeg se ffmpeg binary path lo"""
-    return imageio_ffmpeg.get_ffmpeg_exe()
+def get_card_number(filename):
+    """Filename se card number nikalo"""
+    import re
+    # "(1)" ya "(9)" type pattern dhundho
+    match = re.search(r'\((\d+)\)', filename)
+    if match:
+        return int(match.group(1))
+    # Ya seedha number dhundho
+    match = re.search(r'(\d+)', filename)
+    if match:
+        return int(match.group(1))
+    return 1
 
 
 def build_video(image, voiceover, bgm, output):
     """FFmpeg se 9:16 final Short banata hai"""
-    ffmpeg = get_ffmpeg_exe()
-
-    # ffprobe bhi same folder mein hota hai
-    ffprobe = os.path.join(os.path.dirname(ffmpeg), "ffprobe")
-    if not os.path.exists(ffprobe):
-        # fallback: system ffprobe use karo
-        ffprobe = "ffprobe"
+    ffmpeg = imageio_ffmpeg.get_ffmpeg_exe()
+    ffprobe_path = os.path.join(os.path.dirname(ffmpeg), "ffprobe")
+    if not os.path.exists(ffprobe_path):
+        ffprobe_path = "ffprobe"
 
     r = subprocess.run(
-        [ffprobe, "-v", "quiet", "-show_entries", "format=duration",
+        [ffprobe_path, "-v", "quiet", "-show_entries", "format=duration",
          "-of", "default=noprint_wrappers=1:nokey=1", voiceover],
         capture_output=True, text=True
     )
@@ -230,22 +256,22 @@ def main():
     print(f"CA Prompt Vault — {datetime.now().strftime('%d %b %Y %I:%M %p')}")
     print(f"{'='*50}\n")
 
-    ffmpeg = get_ffmpeg_exe()
-    print(f"✅ ffmpeg path: {ffmpeg}")
+    ffmpeg = imageio_ffmpeg.get_ffmpeg_exe()
+    print(f"✅ ffmpeg: {ffmpeg}")
 
-    # BGM restore karo
+    # BGM restore
     bgm_path = "bgm.mp3"
     if BGM_B64 and not os.path.exists(bgm_path):
         with open(bgm_path, "wb") as f:
             f.write(base64.b64decode(BGM_B64))
-        print("✅ BGM restored from secret")
+        print("✅ BGM restored")
     elif not os.path.exists(bgm_path):
         subprocess.run([
             ffmpeg, "-y", "-f", "lavfi",
             "-i", "aevalsrc=0.1*sin(2*PI*220*t)+0.08*sin(2*PI*330*t):s=44100:d=60",
             bgm_path
         ], capture_output=True)
-        print("✅ BGM generated (fallback tone)")
+        print("✅ BGM generated (fallback)")
 
     # Agle card lo
     card_path, stem = get_next_card()
@@ -253,15 +279,15 @@ def main():
         print("❌ Saari cards use ho gayi! Nayi cards add karo repo mein.")
         return
 
-    info  = CA_CARDS.get(stem, {"num": "?", "title": stem})
-    num   = info["num"]
-    title = info["title"]
-    print(f"📌 Card #{num}: {title}")
-    print(f"📊 File: {card_path.name}")
+    print(f"📌 Card file: {card_path.name}")
+
+    # Card number nikalo filename se
+    num = get_card_number(card_path.name)
+    print(f"🔢 Card number detected: #{num}")
 
     # 1. Script
     print("\n🤖 Script generate ho rahi hai...")
-    script = claude_script(title, num)
+    script, title = claude_script(card_path.name, num)
     print(f"   {script[:70]}...")
 
     # 2. Voiceover
